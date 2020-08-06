@@ -33,9 +33,10 @@ class MyPytorchModel(pl.LightningModule):
         # loss
         loss = F.binary_cross_entropy_with_logits(out, targets)
 
-        preds = torch.sigmoid(out).data > 0.5
+        preds = (torch.sigmoid(out).data > 0.5).float()
 
-        n_correct = (targets == preds).sum()
+        n_correct = (preds == targets).sum()
+
         return loss, n_correct
 
     def general_end(self, outputs, mode):
@@ -66,7 +67,7 @@ class MyPytorchModel(pl.LightningModule):
 
     @pl.data_loader
     def train_dataloader(self):
-        return DataLoader(self.dataset["train"], batch_size=self.hparams["batch_size"])
+        return DataLoader(self.dataset["train"], shuffle=True, batch_size=self.hparams["batch_size"])
 
     @pl.data_loader
     def val_dataloader(self):
@@ -93,7 +94,8 @@ class MyPytorchModel(pl.LightningModule):
             X, y = batch
             X = X.to(self.device)
             score = self.forward(X)
-            scores.append(score.detach().cpu().numpy())
+            preds = torch.sigmoid(score).data > 0.5
+            scores.append(preds.detach().cpu().numpy())
             labels.append(y.detach().cpu().numpy())
 
         scores = np.concatenate(scores, axis=0)

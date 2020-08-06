@@ -43,7 +43,7 @@ class DiganesDataset(torch.utils.data.Dataset):
 
             labels = labels.reset_index(drop=True)
 
-        self.labels_name = labels.columns[2:]
+        self.classes = labels.columns[2:]
         self.labels = labels
         self.root_dir = root_dir
         self.transform = transform
@@ -57,7 +57,7 @@ class DiganesDataset(torch.utils.data.Dataset):
 
         img_name = os.path.join(self.root_dir,
                                 self.labels.loc[idx, "img_name"])
-        image = Image.open(img_name).convert('RGB')
+        image = Image.open(img_name)
 
         if self.transform:
             image = self.transform(image)
@@ -66,16 +66,18 @@ class DiganesDataset(torch.utils.data.Dataset):
 
         return image, labels
 
-    def show_image(self, image, labels):
+    def show_image(self, image, labels, groud_truth=None):
         """Show image with labels"""
 
+        plt.figure()
         if torch.is_tensor(image):
             plt.imshow(image.permute(1, 2, 0))
         else:
             plt.imshow(image)
 
-        img_label_names = self.labels_name[(labels > 0)].tolist()
-        plt.title(img_label_names)
-
-    def classes(self):
-        return self.labels_name
+        img_label_names = self.classes[(labels > 0)].tolist()
+        if groud_truth != None:
+            groud_truth_names = self.classes[(groud_truth > 0)].tolist()
+            plt.title(str(img_label_names) + '\nGround Truth: ' + str(groud_truth_names))
+        else:
+            plt.title(img_label_names)
