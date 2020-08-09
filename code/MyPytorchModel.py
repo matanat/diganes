@@ -74,9 +74,9 @@ class MyPytorchModel(pl.LightningModule):
     def general_end(self, outputs, mode):
         # average over all batches aggregated during one epoch
         avg_loss = torch.stack([x[mode + '_loss'] for x in outputs]).mean()
-        total_f1 = torch.stack([x[mode + '_f1_score'] for x in outputs]).sum().cpu().numpy()
-        f_score = total_f1 / len(self.dataset[mode])
-        return avg_loss, f_score
+        avg_f1 = torch.stack([x[mode + '_f1_score'] for x in outputs]).mean()
+
+        return avg_loss, avg_f1
 
     def training_step(self, batch, batch_idx):
         loss, f_score = self.general_step(batch, batch_idx, "train")
@@ -93,8 +93,8 @@ class MyPytorchModel(pl.LightningModule):
 
     def validation_end(self, outputs):
         avg_loss, f_score = self.general_end(outputs, "val")
-        print("Val-F1={}".format(f_score))
-        tensorboard_logs = {'val_loss': avg_loss}
+        print("Val-F1={:.2f}".format(f_score))
+        tensorboard_logs = {'val_loss': avg_loss, 'val_f1': f_score}
         return {'val_loss': avg_loss, 'val_f1': f_score, 'log': tensorboard_logs}
 
     @pl.data_loader
@@ -133,4 +133,4 @@ class MyPytorchModel(pl.LightningModule):
         labels = np.concatenate(labels, axis=0)
 
         f_score = f1_score(labels, scores, average='macro', zero_division=0)
-        return f_score
+        return f_score, scores, labels
