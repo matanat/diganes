@@ -3,21 +3,51 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import DataLoader, random_split
-from torch.utils.data.sampler import SubsetRandomSampler
 import torchvision
-import torchvision.transforms as transforms
 import numpy as np
+from sklearn.metrics import f1_score
+
+class PretrainedClassifier(nn.Module):
+    def __init__(self, pretrained_model, out_labels, layers_to_freeze=10):
+        super().__init__()
+
+        self.feature_extractor = pretrained_model.features
+
+        # Freeze the parameters of the low-level convolutional bottlenecks
+        for param in self.feature_extractor[0:layers_to_freeze].parameters():
+            param.requires_grad = False
+
+        # Pooling is reliant on the input image size, e.g. for size 64 => (2, 2).
+        self.avg_pool = nn.AvgPool2d((7, 7))
+
+        self.classifier = nn.Sequential(nn.Linear(in_features=1280, out_features=out_labels, bias=True),
+                                        nn.Sigmoid())
+
+    def forward(self, x):
+        x = self.feature_extractor(x)
+
+        x = self.avg_pool(x)
+        x = x.reshape(x.shape[0], -1)
+        x = self.classifier(x)
+
+        return x
 
 class MyPytorchModel(pl.LightningModule):
 
-    def __init__(self, hparams, dataset, model):
+    def __init__(self, hparams, dataset, pretrained_model):
         super().__init__()
 
         self.hparams = hparams
-        self.model = model
-        self.dataset = {"train": dataset[0],
-                "val": dataset[1],
-                "test": dataset[2]}
+        self.model = PretrainedClassifier(pretrained_model, out_labels=len(dataset.classes))
+
+        #prepare dataset split
+        N = len(dataset)
+        train_size = int(N * 0.8)
+        val_size = int(N * 0.1)
+        test_size = N - (train_size + val_size)
+        train_set, val_set, test_set = random_split(dataset, [train_size, val_size, test_size])
+
+        self.dataset = {"train": train_set, "val": val_set, "test": test_set}
 
     def forward(self, x):
         x = self.model(x)
@@ -31,39 +61,41 @@ class MyPytorchModel(pl.LightningModule):
         out = self.forward(images)
 
         # loss
-        loss = F.binary_cross_entropy_with_logits(out, targets)
+        loss = F.binary_cross_entropy(out, targets)
 
-        preds = (torch.sigmoid(out).data > 0.5).float()
+        # simplw tresholding at the moment
+        preds = (out.data > 0.5).float()
 
-        n_correct = (preds == targets).sum()
+        # macro-f1 instead of acc
+        f_score = torch.tensor(f1_score(targets, preds, average='macro', zero_division=0))
 
-        return loss, n_correct
+        return loss, f_score
 
     def general_end(self, outputs, mode):
         # average over all batches aggregated during one epoch
         avg_loss = torch.stack([x[mode + '_loss'] for x in outputs]).mean()
-        total_correct = torch.stack([x[mode + '_n_correct'] for x in outputs]).sum().cpu().numpy()
-        acc = total_correct / len(self.dataset[mode])
-        return avg_loss, acc
+        total_f1 = torch.stack([x[mode + '_f1_score'] for x in outputs]).sum().cpu().numpy()
+        f_score = total_f1 / len(self.dataset[mode])
+        return avg_loss, f_score
 
     def training_step(self, batch, batch_idx):
-        loss, n_correct = self.general_step(batch, batch_idx, "train")
+        loss, f_score = self.general_step(batch, batch_idx, "train")
         tensorboard_logs = {'loss': loss}
-        return {'loss': loss, 'train_n_correct':n_correct, 'log': tensorboard_logs}
+        return {'loss': loss, 'train_f1_score':f_score, 'log': tensorboard_logs}
 
     def validation_step(self, batch, batch_idx):
-        loss, n_correct = self.general_step(batch, batch_idx, "val")
-        return {'val_loss': loss, 'val_n_correct':n_correct}
+        loss, f_score = self.general_step(batch, batch_idx, "val")
+        return {'val_loss': loss, 'val_f1_score':f_score}
 
     def test_step(self, batch, batch_idx):
-        loss, n_correct = self.general_step(batch, batch_idx, "test")
-        return {'test_loss': loss, 'test_n_correct':n_correct}
+        loss, f_score = self.general_step(batch, batch_idx, "test")
+        return {'test_loss': loss, 'test_f1_score':f_score}
 
     def validation_end(self, outputs):
-        avg_loss, acc = self.general_end(outputs, "val")
-        print("Val-Acc={}".format(acc))
+        avg_loss, f_score = self.general_end(outputs, "val")
+        print("Val-F1={}".format(f_score))
         tensorboard_logs = {'val_loss': avg_loss}
-        return {'val_loss': avg_loss, 'val_acc': acc, 'log': tensorboard_logs}
+        return {'val_loss': avg_loss, 'val_f1': f_score, 'log': tensorboard_logs}
 
     @pl.data_loader
     def train_dataloader(self):
@@ -78,29 +110,27 @@ class MyPytorchModel(pl.LightningModule):
         return DataLoader(self.dataset["test"], batch_size=self.hparams["batch_size"])
 
     def configure_optimizers(self):
-        optim = torch.optim.Adam(self.model.parameters(), self.hparams["learning_rate"])
+        optim = torch.optim.Adam(self.model.parameters(), self.hparams["lr"])
         return optim
 
-    def getTestAcc(self, loader = None):
+    def getTestF1(self, loader = None):
         self.model.eval()
-        self.model = self.model.to(self.device)
 
         if not loader: loader = self.test_dataloader()
 
         scores = []
         labels = []
-
         for batch in loader:
             X, y = batch
-            X = X.to(self.device)
+
             score = self.forward(X)
-            preds = torch.sigmoid(score).data > 0.5
+            preds = (score.data > 0.5).float()
+
             scores.append(preds.detach().cpu().numpy())
             labels.append(y.detach().cpu().numpy())
 
         scores = np.concatenate(scores, axis=0)
         labels = np.concatenate(labels, axis=0)
 
-        preds = torch.sigmoid(scores).data > 0.5
-        acc = (labels == preds).mean()
-        return preds, acc
+        f_score = f1_score(labels, scores, average='macro', zero_division=0)
+        return f_score
