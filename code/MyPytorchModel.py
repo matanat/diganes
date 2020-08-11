@@ -23,6 +23,13 @@ class PretrainedClassifier(nn.Module):
         self.classifier = nn.Sequential(nn.Linear(in_features=1280, out_features=out_labels, bias=True),
                                         nn.Sigmoid())
 
+        init_weights(self.classifier)
+
+    def init_weights(m):
+        if type(m) == nn.Linear:
+            torch.nn.init.xavier_uniform(m.weight)
+            m.bias.data.fill_(0.01)
+
     def forward(self, x):
         x = self.feature_extractor(x)
 
@@ -39,15 +46,22 @@ class MyPytorchModel(pl.LightningModule):
 
         self.hparams = hparams
         self.model = PretrainedClassifier(pretrained_model, out_labels=len(dataset.classes))
+        self.dataset = init_datasets(dataset)
 
+    def init_datasets(self, dataset, train_per=0.8, val_per=0.1):
         #prepare dataset split
         N = len(dataset)
-        train_size = int(N * 0.8)
-        val_size = int(N * 0.1)
+        train_size = int(N * train_per)
+        val_size = int(N * val_per)
         test_size = N - (train_size + val_size)
+
         train_set, val_set, test_set = random_split(dataset, [train_size, val_size, test_size])
 
-        self.dataset = {"train": train_set, "val": val_set, "test": test_set}
+        #init pos_weights of loss function
+        pos_count = dataset.label_count()
+        pos_weight = (len(dataset) - pos_count) / pos_count
+
+        return {"train": train_set, "val": val_set, "test": test_set}
 
     def forward(self, x):
         x = self.model(x)
@@ -113,10 +127,10 @@ class MyPytorchModel(pl.LightningModule):
         optim = torch.optim.Adam(self.model.parameters(), self.hparams["lr"])
         return optim
 
-    def getTestF1(self, loader = None):
+    def getDataloaderF1(self, loader = None):
         self.model.eval()
 
-        if not loader: loader = self.test_dataloader()
+        if not loader: loader = self.val_dataloader()
 
         scores = []
         labels = []
@@ -133,4 +147,4 @@ class MyPytorchModel(pl.LightningModule):
         labels = np.concatenate(labels, axis=0)
 
         f_score = f1_score(labels, scores, average='macro', zero_division=0)
-        return f_score, scores, labels
+        return f_score, labels

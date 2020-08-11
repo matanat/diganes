@@ -9,7 +9,7 @@ from torchvision import transforms
 class DiganesDataset(torch.utils.data.Dataset):
     """Diganses seals dataset."""
 
-    def __init__(self, csv_file, root_dir, category=None, min_label_count=None, transform=None):
+    def __init__(self, csv_file, root_dir, category=None, min_label_count=None, transform=None, reverse_transform=None):
         """
         Args:
             csv_file (string): Path to the csv file with labels.
@@ -44,40 +44,47 @@ class DiganesDataset(torch.utils.data.Dataset):
             labels = labels.reset_index(drop=True)
 
         self.classes = labels.columns[2:]
-        self.labels = labels
+        self.labels_frame = labels
         self.root_dir = root_dir
         self.transform = transform
+        self.reverse_transform = reverse_transform
 
     def __len__(self):
-        return len(self.labels)
+        return len(self.labels_frame)
 
     def __getitem__(self, idx):
         if torch.is_tensor(idx):
             idx = idx.tolist()
 
         img_name = os.path.join(self.root_dir,
-                                self.labels.loc[idx, "img_name"])
+                                self.labels_frame.loc[idx, "img_name"])
         image = Image.open(img_name)
 
         if self.transform:
             image = self.transform(image)
 
-        labels = torch.Tensor(self.labels.iloc[idx, 2:].astype(int))
+        labels = torch.Tensor(self.labels_frame.iloc[idx, 2:].astype(int))
 
         return image, labels
 
-    def show_image(self, image, labels, groud_truth=None):
+    def show_image(self, image, labels, predictions=None):
         """Show image with labels"""
 
         plt.figure()
-        if torch.is_tensor(image):
-            plt.imshow(image.permute(1, 2, 0))
+        plt.xticks([])
+        plt.yticks([])
+        plt.grid(False)
+        if torch.is_tensor(image) and self.reverse_transform:
+            plt.imshow(self.reverse_transform(image))
         else:
             plt.imshow(image)
 
         img_label_names = self.classes[(labels > 0)].tolist()
-        if groud_truth != None:
-            groud_truth_names = self.classes[(groud_truth > 0)].tolist()
-            plt.title(str(img_label_names) + '\nGround Truth: ' + str(groud_truth_names))
+        if predictions != None:
+            predictions_names = self.classes[(predictions > 0)].tolist()
+            plt.title('P: ' + str(predictions_names) + '\nL: ' + str(img_label_names))
         else:
             plt.title(img_label_names)
+
+    def label_count(self):
+        return self.labels_frame.iloc[:, 2:].to_numpy().sum(axis=0)
