@@ -23,9 +23,9 @@ class PretrainedClassifier(nn.Module):
         self.classifier = nn.Sequential(nn.Linear(in_features=1280, out_features=out_labels, bias=True),
                                         nn.Sigmoid())
 
-        init_weights(self.classifier)
+        self.init_weights(self.classifier)
 
-    def init_weights(m):
+    def init_weights(self, m):
         if type(m) == nn.Linear:
             torch.nn.init.xavier_uniform(m.weight)
             m.bias.data.fill_(0.01)
@@ -46,7 +46,7 @@ class MyPytorchModel(pl.LightningModule):
 
         self.hparams = hparams
         self.model = PretrainedClassifier(pretrained_model, out_labels=len(dataset.classes))
-        self.dataset = init_datasets(dataset)
+        self.dataset = self.init_datasets(dataset)
 
     def init_datasets(self, dataset, train_per=0.8, val_per=0.1):
         #prepare dataset split
@@ -147,4 +147,4 @@ class MyPytorchModel(pl.LightningModule):
         labels = np.concatenate(labels, axis=0)
 
         f_score = f1_score(labels, scores, average='macro', zero_division=0)
-        return f_score, labels
+        return f_score, scores, labels
