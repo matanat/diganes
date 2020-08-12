@@ -23,7 +23,7 @@ class PretrainedClassifier(nn.Module):
         self.classifier = nn.Sequential(nn.Linear(in_features=1280, out_features=out_labels, bias=True),
                                         nn.Sigmoid())
 
-        self.init_weights(self.classifier)
+        #self.init_weights(self.classifier)
 
     def init_weights(self, m):
         if type(m) == nn.Linear:
@@ -45,8 +45,16 @@ class MyPytorchModel(pl.LightningModule):
         super().__init__()
 
         self.hparams = hparams
-        self.model = PretrainedClassifier(pretrained_model, out_labels=len(dataset.classes))
+        self.model = PretrainedClassifier(pretrained_model,
+                                          out_labels=len(dataset.classes),
+                                          layers_to_freeze=hparams['layers_to_freeze'])
         self.dataset = self.init_datasets(dataset)
+
+        '''
+        #init pos_weights of loss function
+        pos_count = dataset.label_count()
+        pos_weight = (len(dataset) - pos_count) / pos_count
+        '''
 
     def init_datasets(self, dataset, train_per=0.8, val_per=0.1):
         #prepare dataset split
@@ -56,10 +64,6 @@ class MyPytorchModel(pl.LightningModule):
         test_size = N - (train_size + val_size)
 
         train_set, val_set, test_set = random_split(dataset, [train_size, val_size, test_size])
-
-        #init pos_weights of loss function
-        pos_count = dataset.label_count()
-        pos_weight = (len(dataset) - pos_count) / pos_count
 
         return {"train": train_set, "val": val_set, "test": test_set}
 
@@ -81,7 +85,9 @@ class MyPytorchModel(pl.LightningModule):
         preds = (out.data > 0.5).float()
 
         # macro-f1 instead of acc
-        f_score = torch.tensor(f1_score(targets, preds, average='macro', zero_division=0))
+        f_score = torch.tensor(f1_score(targets.detach().cpu().numpy(),
+                                        preds.detach().cpu().numpy(),
+                                        average='macro', zero_division=0))
 
         return loss, f_score
 
@@ -107,7 +113,7 @@ class MyPytorchModel(pl.LightningModule):
 
     def validation_end(self, outputs):
         avg_loss, f_score = self.general_end(outputs, "val")
-        print("Val-F1={:.2f}".format(f_score))
+        print("Val-F1={:.2f}, Val-Loss:{:.2f}".format(f_score, avg_loss))
         tensorboard_logs = {'val_loss': avg_loss, 'val_f1': f_score}
         return {'val_loss': avg_loss, 'val_f1': f_score, 'log': tensorboard_logs}
 
