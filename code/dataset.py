@@ -19,11 +19,11 @@ class H5Dataset(torch.utils.data.Dataset):
         x = self.file['X'][index, ...]
         y = self.file['Y'][index, ...]
 
+        y = y.astype(np.float32).squeeze()
+
         # Preprocessing each image
         if self.transform is not None:
             x = self.transform(x)
-
-        y = y.astype(np.float32).squeeze()
 
         return x, y
 
