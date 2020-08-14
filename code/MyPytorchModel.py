@@ -8,21 +8,22 @@ import numpy as np
 from sklearn.metrics import f1_score
 
 class PretrainedClassifier(nn.Module):
-    def __init__(self, pretrained_model, out_labels, layers_to_freeze=10):
+    def __init__(self, pretrained_model, hparams, nof_classes):
         super().__init__()
 
         self.feature_extractor = pretrained_model.features
 
         # Freeze the parameters of the low-level convolutional bottlenecks
-        for param in self.feature_extractor[0:layers_to_freeze].parameters():
+        for param in self.feature_extractor[0:hparams['layers_to_freeze']].parameters():
             param.requires_grad = False
 
         # Pooling is reliant on the input image size, e.g. for size 64 => (2, 2).
         self.avg_pool = nn.AvgPool2d((7, 7))
 
-        self.classifier = nn.Sequential(nn.Linear(in_features=1280, out_features=out_labels, bias=True))
+        self.classifier = nn.Sequential(nn.Dropout(hparams['dropout_p']),
+                                        nn.Linear(in_features=1280, out_features=nof_classes, bias=True))
 
-        #self.init_weights(self.classifier)
+        self.init_weights(self.classifier)
 
     def init_weights(self, m):
         if type(m) == nn.Linear:
@@ -44,9 +45,8 @@ class MyPytorchModel(pl.LightningModule):
         super().__init__()
 
         self.hparams = hparams
-        self.model = PretrainedClassifier(pretrained_model,
-                                          out_labels=dataset["train"].nof_classes,
-                                          layers_to_freeze=hparams['layers_to_freeze'])
+        self.model = PretrainedClassifier(pretrained_model, hparams,
+                                          nof_classes=dataset["train"].nof_classes)
 
         self.dataset = dataset
         self.criterion = hparams["loss"]
@@ -114,7 +114,8 @@ class MyPytorchModel(pl.LightningModule):
         return DataLoader(self.dataset["test"], batch_size=self.hparams["batch_size"])
 
     def configure_optimizers(self):
-        optim = torch.optim.Adam(self.model.parameters(), self.hparams["lr"])
+        optim = torch.optim.Adam(self.model.parameters(), self.hparams["lr"],
+                                weight_decay=self.hparams["weight_decay"])
         return optim
 
     def getDataloaderF1(self, loader = None):
@@ -127,8 +128,8 @@ class MyPytorchModel(pl.LightningModule):
         for batch in loader:
             X, y = batch
 
-            score = self.forward(X)
-            preds = (score.data > 0.5).float()
+            out = self.forward(X)
+            preds = (torch.sigmoid(out).data > 0.5).float()
 
             scores.append(preds.detach().cpu().numpy())
             labels.append(y.detach().cpu().numpy())

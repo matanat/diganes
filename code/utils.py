@@ -16,6 +16,78 @@ def save_model(model, file_name, directory = "models"):
         os.makedirs(directory)
     pickle.dump(model_dict, open(os.path.join(directory, file_name), 'wb', 4))
 
+def perf_grid(X, target, label_names, model, n_thresh=100):
+    #From https://github.com/ashrefm/multi-label-soft-f1/blob/master/utils.py
+    """Computes the performance table containing target, label names,
+    label frequencies, thresholds between 0 and 1, number of tp, fp, fn,
+    precision, recall and f-score metrics for each label.
+
+    Args:
+        X: Images
+        target (numpy array): target matrix of shape (BATCH_SIZE, N_LABELS)
+        label_names (list of strings): column names in target matrix
+        model (tensorflow keras model): model to use for prediction
+        n_thresh (int) : number of thresholds to try
+
+    Returns:
+        grid (Pandas dataframe): performance table
+    """
+
+    # Get predictions
+    model.eval()
+    out = model.predict(X)
+    y_hat_val = (torch.sigmoid(out).data).float()
+    
+    # Define target matrix
+    y_val = target
+    # Find label frequencies in the validation set
+    label_freq = target.sum(axis=0)
+    # Get label indexes
+    label_index = [i for i in range(len(label_names))]
+    # Define thresholds
+    thresholds = np.linspace(0,1,n_thresh+1).astype(np.float32)
+
+    # Compute all metrics for all labels
+    ids, labels, freqs, tps, fps, fns, precisions, recalls, f1s = [], [], [], [], [], [], [], [], []
+    for l in label_index:
+        for thresh in thresholds:
+            ids.append(l)
+            labels.append(label_names[l])
+            freqs.append(round(label_freq[l]/len(y_val),2))
+            y_hat = y_hat_val[:,l]
+            y = y_val[:,l]
+            y_pred = y_hat > thresh
+            tp = np.count_nonzero(y_pred  * y)
+            fp = np.count_nonzero(y_pred * (1-y))
+            fn = np.count_nonzero((1-y_pred) * y)
+            precision = tp / (tp + fp + 1e-16)
+            recall = tp / (tp + fn + 1e-16)
+            f1 = 2*tp / (2*tp + fn + fp + 1e-16)
+            tps.append(tp)
+            fps.append(fp)
+            fns.append(fn)
+            precisions.append(precision)
+            recalls.append(recall)
+            f1s.append(f1)
+
+    # Create the performance dataframe
+    grid = pd.DataFrame({
+        'id':ids,
+        'label':labels,
+        'freq':freqs,
+        'threshold':list(thresholds)*len(label_index),
+        'tp':tps,
+        'fp':fps,
+        'fn':fns,
+        'precision':precisions,
+        'recall':recalls,
+        'f1':f1s})
+
+    grid = grid[['id', 'label', 'freq', 'threshold',
+                 'tp', 'fn', 'fp', 'precision', 'recall', 'f1']]
+
+    return grid
+
 
 #taken from https://gist.github.com/SuperShinyEyes/dcc68a08ff8b615442e3bc6a9b55a354
 class F1_Loss(nn.Module):
