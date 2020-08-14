@@ -20,8 +20,7 @@ class PretrainedClassifier(nn.Module):
         # Pooling is reliant on the input image size, e.g. for size 64 => (2, 2).
         self.avg_pool = nn.AvgPool2d((7, 7))
 
-        self.classifier = nn.Sequential(nn.Linear(in_features=1280, out_features=out_labels, bias=True),
-                                        nn.Sigmoid())
+        self.classifier = nn.Sequential(nn.Linear(in_features=1280, out_features=out_labels, bias=True))
 
         #self.init_weights(self.classifier)
 
@@ -46,16 +45,11 @@ class MyPytorchModel(pl.LightningModule):
 
         self.hparams = hparams
         self.model = PretrainedClassifier(pretrained_model,
-                                          out_labels=len(dataset["train"].classes),
+                                          out_labels=dataset["train"].nof_classes,
                                           layers_to_freeze=hparams['layers_to_freeze'])
 
         self.dataset = dataset
-
-        '''
-        #init pos_weights of loss function
-        pos_count = dataset.label_count()
-        pos_weight = (len(dataset) - pos_count) / pos_count
-        '''
+        self.criterion = hparams["loss"]
 
     def forward(self, x):
         x = self.model(x)
@@ -69,10 +63,10 @@ class MyPytorchModel(pl.LightningModule):
         out = self.forward(images)
 
         # loss
-        loss = F.binary_cross_entropy(out, targets)
+        loss = self.criterion(out, targets)
 
-        # simplw tresholding at the moment
-        preds = (out.data > 0.5).float()
+        # simple tresholding at the moment
+        preds = (torch.sigmoid(out).data > 0.5).float()
 
         # macro-f1 instead of acc
         f_score = torch.tensor(f1_score(targets.detach().cpu().numpy(),

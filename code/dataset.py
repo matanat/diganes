@@ -13,7 +13,8 @@ class H5Dataset(torch.utils.data.Dataset):
 
         self.file = h5py.File(in_file, 'r')
         self.transform = transform
-        self.classes = self.file['Y'][0, ...][0]
+        self.nof_classes = len(self.file['Y'][0, ...][0])
+        self.pos_count = self.file['Y'][:].sum(axis=0).squeeze()
 
     def __getitem__(self, index):
         x = self.file['X'][index, ...]
