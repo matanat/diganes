@@ -1,5 +1,7 @@
 import torch
 import pickle
+import torch.nn as nn
+import os
 
 def load_model(model_path):
     model_dict = pickle.load(open(model_path, 'rb'))["diganes"]
