@@ -92,7 +92,7 @@ class DiganesDataset(torch.utils.data.Dataset):
 
         return image, labels
 
-    def show_image(self, image, labels, predictions=None):
+    def show_image(self, image, labels, predictions):
         """Show image with labels"""
 
         plt.figure()
@@ -105,11 +105,9 @@ class DiganesDataset(torch.utils.data.Dataset):
             plt.imshow(image)
 
         img_label_names = self.classes[(labels > 0)].tolist()
-        if predictions != None:
-            predictions_names = self.classes[(predictions > 0)].tolist()
-            plt.title('P: ' + str(predictions_names) + '\nL: ' + str(img_label_names))
-        else:
-            plt.title(img_label_names)
+
+        predictions_names = self.classes[(predictions > 0)].tolist()
+        plt.title('P: ' + str(predictions_names) + '\nL: ' + str(img_label_names))
 
     def label_count(self):
         return self.labels_frame.iloc[:, 2:].to_numpy().sum(axis=0)

@@ -1,11 +1,15 @@
 import torch
 import pickle
 import torch.nn as nn
+import numpy as np
+import pandas as pd
 import os
+from .MyPytorchModel import MyPytorchModel
 
-def load_model(model_path):
+def load_model(model_path, dataset, pretrained_model, loss):
     model_dict = pickle.load(open(model_path, 'rb'))["diganes"]
-    model = MyPytorchModel(model_dict["hparams"])
+    model_dict["hparams"]["loss"] = loss
+    model = MyPytorchModel(model_dict["hparams"], dataset, pretrained_model)
     model.load_state_dict(model_dict["state_dict"])
     return model
 
@@ -16,7 +20,22 @@ def save_model(model, file_name, directory = "models"):
         os.makedirs(directory)
     pickle.dump(model_dict, open(os.path.join(directory, file_name), 'wb', 4))
 
-def perf_grid(X, target, label_names, model, n_thresh=100):
+def optimal_tresholds(grid):
+    """Comptues the optimal threshold for binary classifcation for each label based on
+    F-1 score.
+    Recived performance grid as DataFrame.
+    """
+    max_perf = grid.groupby(['id', 'label', 'freq'])[['f1']].max().sort_values('f1', ascending=False).reset_index()
+
+    nof_classes = len(max_perf)
+    thresholds = np.zeros((nof_classes,))
+    for i in range(nof_classes):
+        max_f1 = max_perf[max_perf.id.eq(i)].f1.values[0]
+        thresholds[i] = grid[grid.id.eq(i) & grid.f1.eq(max_f1)].sort_values('threshold', ascending=False).threshold.values[0]
+
+    return thresholds
+
+def perf_grid(outputs, target, label_names, n_thresh=100):
     #From https://github.com/ashrefm/multi-label-soft-f1/blob/master/utils.py
     """Computes the performance table containing target, label names,
     label frequencies, thresholds between 0 and 1, number of tp, fp, fn,
@@ -26,7 +45,6 @@ def perf_grid(X, target, label_names, model, n_thresh=100):
         X: Images
         target (numpy array): target matrix of shape (BATCH_SIZE, N_LABELS)
         label_names (list of strings): column names in target matrix
-        model (tensorflow keras model): model to use for prediction
         n_thresh (int) : number of thresholds to try
 
     Returns:
@@ -34,10 +52,8 @@ def perf_grid(X, target, label_names, model, n_thresh=100):
     """
 
     # Get predictions
-    model.eval()
-    out = model.predict(X)
-    y_hat_val = (torch.sigmoid(out).data).float()
-    
+    y_hat_val = outputs
+
     # Define target matrix
     y_val = target
     # Find label frequencies in the validation set
@@ -55,8 +71,8 @@ def perf_grid(X, target, label_names, model, n_thresh=100):
             labels.append(label_names[l])
             freqs.append(round(label_freq[l]/len(y_val),2))
             y_hat = y_hat_val[:,l]
-            y = y_val[:,l]
-            y_pred = y_hat > thresh
+            y = y_val[:,l].astype(int)
+            y_pred = (y_hat > thresh).astype(int)
             tp = np.count_nonzero(y_pred  * y)
             fp = np.count_nonzero(y_pred * (1-y))
             fn = np.count_nonzero((1-y_pred) * y)
