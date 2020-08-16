@@ -35,7 +35,7 @@ def optimal_tresholds(grid):
 
     return thresholds
 
-def perf_grid(outputs, target, label_names, n_thresh=100):
+def perf_grid(outputs, target, label_names, label_freq, n_thresh=100):
     #From https://github.com/ashrefm/multi-label-soft-f1/blob/master/utils.py
     """Computes the performance table containing target, label names,
     label frequencies, thresholds between 0 and 1, number of tp, fp, fn,
@@ -45,6 +45,7 @@ def perf_grid(outputs, target, label_names, n_thresh=100):
         X: Images
         target (numpy array): target matrix of shape (BATCH_SIZE, N_LABELS)
         label_names (list of strings): column names in target matrix
+        label_freq (list of floats): freq of each label in training set
         n_thresh (int) : number of thresholds to try
 
     Returns:
@@ -56,8 +57,7 @@ def perf_grid(outputs, target, label_names, n_thresh=100):
 
     # Define target matrix
     y_val = target
-    # Find label frequencies in the validation set
-    label_freq = target.sum(axis=0)
+
     # Get label indexes
     label_index = [i for i in range(len(label_names))]
     # Define thresholds
@@ -69,7 +69,7 @@ def perf_grid(outputs, target, label_names, n_thresh=100):
         for thresh in thresholds:
             ids.append(l)
             labels.append(label_names[l])
-            freqs.append(round(label_freq[l]/len(y_val),2))
+            freqs.append(label_freq[l])
             y_hat = y_hat_val[:,l]
             y = y_val[:,l].astype(int)
             y_pred = (y_hat > thresh).astype(int)
@@ -127,11 +127,12 @@ class F1_Loss(nn.Module):
         super().__init__()
         self.epsilon = epsilon
 
-    def forward(self, y_pred, y_true,):
-        assert y_pred.ndim == 2
-        assert y_true.ndim == 1
-        y_true = F.one_hot(y_true, 2).to(torch.float32)
-        y_pred = F.softmax(y_pred, dim=1)
+    def forward(self, logits, y_true,):
+        assert logits.ndim == 2
+        assert y_true.ndim == 2
+
+        y_true = y_true.to(torch.float32)
+        y_pred = torch.sigmoid(logits).to(torch.float32)
 
         tp = (y_true * y_pred).sum(dim=0).to(torch.float32)
         tn = ((1 - y_true) * (1 - y_pred)).sum(dim=0).to(torch.float32)
@@ -143,4 +144,5 @@ class F1_Loss(nn.Module):
 
         f1 = 2* (precision*recall) / (precision + recall + self.epsilon)
         f1 = f1.clamp(min=self.epsilon, max=1-self.epsilon)
+
         return 1 - f1.mean()

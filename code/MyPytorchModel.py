@@ -60,13 +60,13 @@ class MyPytorchModel(pl.LightningModule):
         images, targets = batch
 
         # forward pass
-        out = self.forward(images)
+        logits = self.forward(images)
 
         # loss
-        loss = self.criterion(out, targets)
+        loss = self.criterion(logits, targets)
 
-        # simple tresholding at the moment
-        preds = (torch.sigmoid(out).data > 0.5).float()
+        # simple tresholding during training
+        preds = (torch.sigmoid(logits).data > 0.5).float()
 
         # macro-f1 instead of acc
         f_score = torch.tensor(f1_score(targets.detach().cpu().numpy(),
@@ -125,17 +125,20 @@ class MyPytorchModel(pl.LightningModule):
 
         scores = []
         labels = []
+        outputs = []
         for batch in loader:
             X, y = batch
 
-            out = self.forward(X)
-            preds = (torch.sigmoid(out).data > 0.5).float()
+            out = torch.sigmoid(self.forward(X)).data
+            preds = (out > 0.5).float()
 
             scores.append(preds.detach().cpu().numpy())
             labels.append(y.detach().cpu().numpy())
+            outputs.append(out.detach().cpu().numpy())
 
         scores = np.concatenate(scores, axis=0)
         labels = np.concatenate(labels, axis=0)
+        outputs = np.concatenate(outputs, axis=0)
 
         f_score = f1_score(labels, scores, average='macro', zero_division=0)
-        return f_score, scores, labels
+        return f_score, scores, labels, outputs
