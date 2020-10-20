@@ -65,16 +65,15 @@ class MyPytorchModel(pl.LightningModule):
         # loss
         loss = self.criterion(logits, targets)
 
-        """
         # simple tresholding during training
         preds = (torch.sigmoid(logits).data > 0.5).float()
 
+        """
         # macro-f1 instead of acc
         f_score = torch.tensor(f1_score(targets.detach().cpu().numpy(),
                                         preds.detach().cpu().numpy(),
                                         average='macro', zero_division=0))
         """
-        preds = logits.argmax(axis=1)
         n_correct = (targets == preds).sum()
 
         return loss, n_correct
