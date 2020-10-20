@@ -31,6 +31,22 @@ class H5Dataset(torch.utils.data.Dataset):
     def __len__(self):
         return self.file['X'].shape[0]
 
+class H5DatasetSingleLabel(H5Dataset):
+        def __init__(self, in_file, filter_label_idx, transform=None):
+            super().__init__(in_file, transform)
+
+            if filter_label_idx > self.nof_classes - 1:
+                raise("Iligal label index")
+
+            self.nof_classes = 1
+            self.pos_count = self.pos_count[filter_label_idx]
+            self.filter_label_idx = filter_label_idx
+
+        def __getitem__(self, index):
+            x, y = super().__getitem__(index)
+
+            return x, y[self.filter_label_idx].reshape([1])
+
 class DiganesDataset(torch.utils.data.Dataset):
     """Diganses seals dataset."""
 
@@ -69,6 +85,7 @@ class DiganesDataset(torch.utils.data.Dataset):
             labels = labels.reset_index(drop=True)
 
         self.classes = labels.columns[2:]
+
         self.labels_frame = labels
         self.root_dir = root_dir
         self.transform = transform
@@ -102,7 +119,7 @@ class DiganesDataset(torch.utils.data.Dataset):
         if torch.is_tensor(image) and self.reverse_transform:
             plt.imshow(self.reverse_transform(image))
         else:
-            plt.imshow(image)
+            plt.imshow(image, cmap='Greys_r')
 
         img_label_names = self.classes[(labels > 0)].tolist()
 
@@ -111,3 +128,28 @@ class DiganesDataset(torch.utils.data.Dataset):
 
     def label_count(self):
         return self.labels_frame.iloc[:, 2:].to_numpy().sum(axis=0)
+
+class DiganesDatasetSingleLabel(DiganesDataset):
+    """Diganses seals dataset."""
+
+    def __init__(self, csv_file, root_dir, category=None, min_label_count=None, transform=None, reverse_transform=None, filter_label=None):
+        super().__init__(csv_file, root_dir, category, min_label_count, transform, reverse_transform)
+
+        if filter_label != None and  (filter_label not in self.classes):
+            raise Exception("%s not in allowed labels: %s", filter_label, self.classes)
+
+        self.filter_label_idx = list(self.classes).index(filter_label)
+
+    def __getitem__(self, idx):
+        image, labels = super().__getitem__(idx)
+
+        return image, labels[self.filter_label_idx].reshape([1])
+
+    def show_image(self, image, label, prediction):
+        labels = np.zeros_like(self.classes)
+        labels[self.filter_label_idx] = label
+
+        predictions = np.zeros_like(self.classes)
+        predictions[self.filter_label_idx] = prediction
+
+        super().show_image(image, labels, predictions)
