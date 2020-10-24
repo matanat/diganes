@@ -2,10 +2,15 @@ import pytorch_lightning as pl
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, WeightedRandomSampler
 import torchvision
 import numpy as np
 from sklearn.metrics import f1_score
+
+def init_weights(m):
+    if type(m) == nn.Linear:
+        torch.nn.init.xavier_normal_(m.weight)
+        m.bias.data.fill_(0.01)
 
 class PretrainedClassifier(nn.Module):
     def __init__(self, pretrained_model, hparams, nof_classes):
@@ -20,15 +25,12 @@ class PretrainedClassifier(nn.Module):
         # Pooling is reliant on the input image size, e.g. for size 64 => (2, 2).
         self.avg_pool = nn.AvgPool2d((7, 7))
 
-        self.classifier = nn.Sequential(nn.Dropout(hparams['dropout_p']),
-                                        nn.Linear(in_features=1280, out_features=nof_classes, bias=True))
+        self.classifier = nn.Sequential(nn.Dropout(p=hparams["dropout_p"]),
+                                        nn.Linear(in_features=1280, out_features=hparams['hidden_layer_size'], bias=True),
+                                        nn.ReLU(),
+                                        nn.Linear(in_features=hparams['hidden_layer_size'], out_features=nof_classes, bias=True))
 
-        self.init_weights(self.classifier)
-
-    def init_weights(self, m):
-        if type(m) == nn.Linear:
-            torch.nn.init.xavier_uniform(m.weight)
-            m.bias.data.fill_(0.01)
+        self.classifier.apply(init_weights)
 
     def forward(self, x):
         x = self.feature_extractor(x)
@@ -68,48 +70,49 @@ class MyPytorchModel(pl.LightningModule):
         # simple tresholding during training
         preds = (torch.sigmoid(logits).data > 0.5).float()
 
-        """
+        n_correct = (targets == preds).sum()
+
         # macro-f1 instead of acc
         f_score = torch.tensor(f1_score(targets.detach().cpu().numpy(),
                                         preds.detach().cpu().numpy(),
                                         average='macro', zero_division=0))
-        """
-        n_correct = (targets == preds).sum()
 
-        return loss, n_correct
+        return loss, n_correct, f_score
 
     def general_end(self, outputs, mode):
         # average over all batches aggregated during one epoch
         avg_loss = torch.stack([x[mode + '_loss'] for x in outputs]).mean()
-        #avg_f1 = torch.stack([x[mode + '_f1_score'] for x in outputs]).mean()
+        avg_f1 = torch.stack([x[mode + '_f1_score'] for x in outputs]).mean()
 
         total_correct = torch.stack([x[mode + '_n_correct'] for x in outputs]).sum().cpu().numpy()
         acc = total_correct / len(self.dataset[mode])
 
-        return avg_loss, acc
+        return avg_loss, avg_f1, acc
 
     def training_step(self, batch, batch_idx):
-        loss, n_correct = self.general_step(batch, batch_idx, "train")
+        loss, n_correct, f_score = self.general_step(batch, batch_idx, "train")
         tensorboard_logs = {'loss': loss}
-        return {'loss': loss, 'train_n_correct':n_correct, 'log': tensorboard_logs}
+        return {'loss': loss, 'train_n_correct':n_correct, 'train_f1_score':f_score, 'log': tensorboard_logs}
 
     def validation_step(self, batch, batch_idx):
-        loss, n_correct = self.general_step(batch, batch_idx, "val")
-        return {'val_loss': loss, 'val_n_correct':n_correct}
+        loss, n_correct, f_score = self.general_step(batch, batch_idx, "val")
+        return {'val_loss': loss, 'val_n_correct':n_correct, 'val_f1_score':f_score}
 
     def test_step(self, batch, batch_idx):
-        loss, n_correct = self.general_step(batch, batch_idx, "test")
-        return {'test_loss': loss, 'val_n_correct':n_correct}
+        loss, n_correctm, f_score = self.general_step(batch, batch_idx, "test")
+        return {'test_loss': loss, 'test_n_correct':n_correct, 'test_f1_score':f_score}
 
     def validation_end(self, outputs):
-        avg_loss, acc = self.general_end(outputs, "val")
-        print("Val-Acc={:.2f}, Val-Loss:{:.2f}".format(acc, avg_loss))
-        tensorboard_logs = {'val_loss': avg_loss, 'val_acc': acc}
-        return {'val_loss': avg_loss, 'val_acc': acc, 'log': tensorboard_logs}
+        avg_loss, avg_f1, acc = self.general_end(outputs, "val")
+        print("Val-Acc={:.2f}, Val-F1-Score={:.2f}, Val-Loss:{:.2f}".format(acc, avg_f1, avg_loss))
+        tensorboard_logs = {'val_loss': avg_loss, 'val_f1_score': avg_f1, 'val_acc': acc}
+        return {'val_loss': avg_loss, 'val_f1_score': avg_f1, 'val_acc': acc, 'log': tensorboard_logs}
 
     #@pl.data_loader
     def train_dataloader(self):
-        return DataLoader(self.dataset["train"], shuffle=True, batch_size=self.hparams["batch_size"])
+        #return DataLoader(self.dataset["train"], shuffle=True, batch_size=self.hparams["batch_size"])
+        sampler = WeightedRandomSampler(self.hparams["train_sampler_weights"], len(self.dataset["train"]))
+        return DataLoader(self.dataset["train"], sampler=sampler, batch_size=self.hparams["batch_size"])
 
     #@pl.data_loader
     def val_dataloader(self):
