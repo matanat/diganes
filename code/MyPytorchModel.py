@@ -127,27 +127,22 @@ class MyPytorchModel(pl.LightningModule):
                                 weight_decay=self.hparams["weight_decay"])
         return optim
 
-    def getDataloaderF1(self, loader = None):
+    def getDataloaderScores(self, loader = None):
         self.model.eval()
 
         if not loader: loader = self.val_dataloader()
 
         scores = []
         labels = []
-        outputs = []
         for batch in loader:
             X, y = batch
 
-            out = torch.sigmoid(self.forward(X)).data
-            preds = (out > 0.5).float()
+            score = torch.sigmoid(self.forward(X)).data
 
-            scores.append(preds.detach().cpu().numpy())
+            scores.append(score.float().detach().cpu().numpy())
             labels.append(y.detach().cpu().numpy())
-            outputs.append(out.detach().cpu().numpy())
 
         scores = np.concatenate(scores, axis=0)
         labels = np.concatenate(labels, axis=0)
-        outputs = np.concatenate(outputs, axis=0)
 
-        f_score = f1_score(labels, scores, average='macro', zero_division=0)
-        return f_score, scores, labels, outputs
+        return scores, labels
