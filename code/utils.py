@@ -20,18 +20,18 @@ def save_model(model, file_name, directory = "models"):
         os.makedirs(directory)
     pickle.dump(model_dict, open(os.path.join(directory, file_name), 'wb', 4))
 
-def optimal_tresholds(grid):
+def optimal_tresholds(grid, criterion="precision"):
     """Comptues the optimal threshold for binary classifcation for each label based on
-    F-1 score.
+    criterion ("precision", "recall", "f1")
     Recived performance grid as DataFrame.
     """
-    max_perf = grid.groupby(['id', 'label', 'freq'])[['f1']].max().sort_values('f1', ascending=False).reset_index()
+    max_perf = grid.groupby(['id', 'label', 'freq'])[[criterion]].max().sort_values(criterion, ascending=False).reset_index()
 
     nof_classes = len(max_perf)
     thresholds = np.zeros((nof_classes,))
     for i in range(nof_classes):
-        max_f1 = max_perf[max_perf.id.eq(i)].f1.values[0]
-        thresholds[i] = grid[grid.id.eq(i) & grid.f1.eq(max_f1)].sort_values('threshold', ascending=False).threshold.values[0]
+        max_val = max_perf[max_perf.id.eq(i)][criterion].values[0]
+        thresholds[i] = grid[grid.id.eq(i) & grid[criterion].eq(max_val)].sort_values('threshold', ascending=False).threshold.values[0]
 
     return thresholds
 
@@ -39,7 +39,7 @@ def perf_grid(outputs, target, label_names, label_freq, n_thresh=100):
     #From https://github.com/ashrefm/multi-label-soft-f1/blob/master/utils.py
     """Computes the performance table containing target, label names,
     label frequencies, thresholds between 0 and 1, number of tp, fp, fn,
-    precision, recall and f-score metrics for each label.
+    precision, recall and f1 metrics for each label.
 
     Args:
         X: Images
